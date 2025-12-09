@@ -1,0 +1,284 @@
+```
+╔═══════════════════════════════════════════════════════════════════════════════╗
+║                    A2A AGENT COMMUNICATION ARCHITECTURE                       ║
+╚═══════════════════════════════════════════════════════════════════════════════╝
+
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                                USER REQUEST                                  │
+│                                                                              │
+│   "Ask agent data-scientist-001 to explain clustering algorithms"           │
+└────────────────────────────────┬────────────────────────────────────────────┘
+                                 │
+                                 ▼
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                      CLAUDE (Anthropic AI Assistant)                         │
+│                                                                              │
+│  • Understands user intent                                                   │
+│  • Sees available tools (MCP + Local)                                        │
+│  • Decides which tools to call and in what order                             │
+│  • Orchestrates multi-step workflows                                         │
+└──────────────────┬─────────────────────────────┬────────────────────────────┘
+                   │                             │
+         ┌─────────▼─────────┐         ┌────────▼────────┐
+         │   MCP TOOLS       │         │  LOCAL TOOLS    │
+         │  (Discovery)      │         │ (Communication) │
+         └─────────┬─────────┘         └────────┬────────┘
+                   │                             │
+                   │                             │
+                   ▼                             ▼
+
+
+╔══════════════════════════════╗      ╔═══════════════════════════════════╗
+║    MCP PROTOCOL LAYER        ║      ║    A2A PROTOCOL LAYER             ║
+║  (Agent Discovery)           ║      ║  (Agent Communication)            ║
+╚══════════════════════════════╝      ╚═══════════════════════════════════╝
+
+┌──────────────────────────────┐      ┌───────────────────────────────────┐
+│  MCP Client                  │      │  A2A Client (httpx)               │
+│  ├─ list_tools()             │      │  ├─ get_agent_card()              │
+│  ├─ call_tool()              │      │  ├─ send_message()                │
+│  └─ get_response()           │      │  └─ receive_response()            │
+└──────────────┬───────────────┘      └──────────────┬────────────────────┘
+               │                                     │
+               │ stdio/RPC                           │ HTTPS
+               ▼                                     ▼
+
+┌──────────────────────────────┐      ┌───────────────────────────────────┐
+│  MCP SERVER                  │      │  TARGET AGENT                     │
+│  (src/agent_mcp.py)          │      │  (Remote A2A Service)             │
+│                              │      │                                   │
+│  Tools:                      │      │  Endpoints:                       │
+│  ├─ register_agent           │      │  ├─ /.well-known/agent.json      │
+│  ├─ list_agents              │      │  │   (Agent Card)                 │
+│  ├─ search_agents            │      │  └─ /a2a                          │
+│  ├─ get_agent ◄─────────────────────────┐  (A2A Protocol)             │
+│  ├─ update_agent             │      │      │                            │
+│  ├─ delete_agent             │      │      │                            │
+│  ├─ get_agent_facts          │      │      │                            │
+│  └─ health_check             │      │      │                            │
+└──────────────┬───────────────┘      └──────┼────────────────────────────┘
+               │                             │
+               ▼                             │
+┌──────────────────────────────┐            │
+│  MONGODB ATLAS               │            │
+│  (Registry Database)         │            │
+│                              │            │
+│  Collections:                │            │
+│  ├─ nanda_simulation.index   │            │
+│  │   (Agent metadata)        │            │
+│  └─ nanda_chat.agent_facts   │            │
+│      (Agent facts)           │            │
+└──────────────────────────────┘            │
+                                             │
+                                             │
+          INFORMATION FLOW:                  │
+                                             │
+     1. User asks about agent                │
+     2. Claude calls get_agent (MCP) ────────┘
+     3. Gets agent URL from database
+     4. Claude calls send_a2a_message (Local)
+     5. A2A client contacts target agent ─────┘
+     6. Agent responds via A2A protocol
+     7. Response flows back to Claude
+     8. Claude formats response for user
+
+
+═══════════════════════════════════════════════════════════════════════════════
+                              TOOL CATEGORIES
+═══════════════════════════════════════════════════════════════════════════════
+
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                           MCP TOOLS (Server-side)                            │
+│                                                                              │
+│  Defined in: src/agent_mcp.py                                                │
+│  Protocol: MCP via stdio                                                     │
+│  Purpose: Registry operations (CRUD)                                         │
+│                                                                              │
+│  • register_agent    - Add new agent to registry                             │
+│  • list_agents       - Get all registered agents                             │
+│  • search_agents     - Search by tags, names, etc.                           │
+│  • get_agent         - Get specific agent details ──┐                        │
+│  • update_agent      - Update agent metadata        │                        │
+│  • delete_agent      - Remove agent from registry   │                        │
+│  • get_agent_facts   - Get agent facts              │                        │
+│  • health_check      - Check server health          │                        │
+│                                                      │                        │
+│  Returns: JSON with agent metadata including URL ───┘                        │
+└─────────────────────────────────────────────────────────────────────────────┘
+
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                         LOCAL TOOLS (Client-side)                            │
+│                                                                              │
+│  Defined in: examples/a2a_agent_communication.py                             │
+│  Protocol: Direct Python function calls                                      │
+│  Purpose: Agent communication via A2A                                        │
+│                                                                              │
+│  • send_a2a_message  - Communicate with remote agent                         │
+│      ├─ Input: agent_url (from get_agent)                                    │
+│      ├─ Input: message (user's request)                                      │
+│      ├─ Input: context_id (optional, for multi-turn)                         │
+│      ├─ Process: Normalize URL (add /a2a)                                    │
+│      ├─ Process: Fetch agent card                                            │
+│      ├─ Process: Create A2A client                                           │
+│      ├─ Process: Send A2A message                                            │
+│      └─ Returns: Agent's response                                            │
+└─────────────────────────────────────────────────────────────────────────────┘
+
+
+═══════════════════════════════════════════════════════════════════════════════
+                            EXECUTION FLOW EXAMPLE
+═══════════════════════════════════════════════════════════════════════════════
+
+USER: "Ask agent data-scientist-001 to explain clustering"
+
+Step 1: Claude Analyzes Request
+   └─> Identifies: Need to communicate with specific agent
+   └─> Plans: First discover agent, then communicate
+
+Step 2: Agent Discovery (MCP)
+   ┌─────────────────────────────────────────────────┐
+   │ Claude → MCP Client → MCP Server → MongoDB      │
+   │                                                 │
+   │ call_tool(                                      │
+   │   name="get_agent",                             │
+   │   args={"agent_id": "data-scientist-001"}       │
+   │ )                                               │
+   │                                                 │
+   │ Returns:                                        │
+   │ {                                               │
+   │   "agent_id": "data-scientist-001",             │
+   │   "name": "Data Science Expert",                │
+   │   "url": "https://ds-agent.example.com", ◄──────┼─── IMPORTANT
+   │   "tags": ["data-science", "ml"],               │
+   │   ...                                           │
+   │ }                                               │
+   └─────────────────────────────────────────────────┘
+
+Step 3: Agent Communication (A2A)
+   ┌─────────────────────────────────────────────────┐
+   │ Claude → Python Code → A2A Client → Agent       │
+   │                                                 │
+   │ send_a2a_message(                               │
+   │   agent_url="https://ds-agent.example.com",     │
+   │   message="Explain clustering algorithms"       │
+   │ )                                               │
+   │                                                 │
+   │ Process:                                        │
+   │ 1. Normalize URL                                │
+   │    → https://ds-agent.example.com/a2a           │
+   │                                                 │
+   │ 2. Fetch Agent Card                             │
+   │    GET /.well-known/agent.json                  │
+   │    → {name, capabilities, version, ...}         │
+   │                                                 │
+   │ 3. Create A2A Client                            │
+   │    client = A2AClient(httpx_client, card)       │
+   │                                                 │
+   │ 4. Send Message                                 │
+   │    POST /a2a                                    │
+   │    Body: SendMessageRequest                     │
+   │                                                 │
+   │ 5. Receive Response                             │
+   │    SendMessageResponse with agent's reply       │
+   │                                                 │
+   │ Returns:                                        │
+   │ {                                               │
+   │   "status": "success",                          │
+   │   "agent_name": "Data Science Expert",          │
+   │   "response": "Clustering is..."                │
+   │ }                                               │
+   └─────────────────────────────────────────────────┘
+
+Step 4: Response Integration
+   └─> Claude receives both results
+   └─> Formats natural language response
+   └─> Returns to user
+
+RESULT: "I asked the Data Science Expert agent about clustering.
+         They explained: Clustering is a technique..."
+
+
+═══════════════════════════════════════════════════════════════════════════════
+                           WHY THIS ARCHITECTURE?
+═══════════════════════════════════════════════════════════════════════════════
+
+┌──────────────────────┬──────────────────────────────────────────────────────┐
+│ DESIGN DECISION      │ RATIONALE                                            │
+├──────────────────────┼──────────────────────────────────────────────────────┤
+│ MCP for Discovery    │ • Standardized protocol for tool calling            │
+│                      │ • Works with Claude Desktop and other MCP clients   │
+│                      │ • Easy to add new registry operations               │
+├──────────────────────┼──────────────────────────────────────────────────────┤
+│ A2A for Communication│ • Purpose-built for agent-to-agent messaging        │
+│                      │ • Supports streaming, context, attachments          │
+│                      │ • Standard protocol for agent coordination          │
+├──────────────────────┼──────────────────────────────────────────────────────┤
+│ Separate Tool Types  │ • Clear separation of concerns                      │
+│                      │ • MCP server doesn't need HTTP client               │
+│                      │ • Local tools can use async patterns               │
+├──────────────────────┼──────────────────────────────────────────────────────┤
+│ Claude Orchestration │ • Natural language interface                        │
+│                      │ • Flexible tool selection                           │
+│                      │ • Multi-step workflow support                       │
+└──────────────────────┴──────────────────────────────────────────────────────┘
+
+
+═══════════════════════════════════════════════════════════════════════════════
+                            KEY IMPLEMENTATION DETAILS
+═══════════════════════════════════════════════════════════════════════════════
+
+Tool Definition (Local A2A Tool):
+┌─────────────────────────────────────────────────────────────────────────────┐
+│ {                                                                            │
+│   "name": "send_a2a_message",                                                │
+│   "description": "Send a message to an agent using the A2A protocol...",     │
+│   "input_schema": {                                                          │
+│     "type": "object",                                                        │
+│     "properties": {                                                          │
+│       "agent_url": {                                                         │
+│         "type": "string",                                                    │
+│         "description": "The URL from get_agent result"                       │
+│       },                                                                     │
+│       "message": {                                                           │
+│         "type": "string",                                                    │
+│         "description": "Message to send to the agent"                        │
+│       },                                                                     │
+│       "context_id": {                                                        │
+│         "type": "string",                                                    │
+│         "description": "Optional context for multi-turn"                     │
+│       }                                                                      │
+│     },                                                                       │
+│     "required": ["agent_url", "message"]                                     │
+│   }                                                                          │
+│ }                                                                            │
+└─────────────────────────────────────────────────────────────────────────────┘
+
+A2A Message Structure:
+┌─────────────────────────────────────────────────────────────────────────────┐
+│ Message(                                                                     │
+│     role=Role.user,                                                          │
+│     parts=[Part(root=TextPart(text="Your message"))],                        │
+│     message_id=str(uuid4()),                                                 │
+│     context_id="optional-conversation-id"                                    │
+│ )                                                                            │
+│                                                                              │
+│ Wrapped in:                                                                  │
+│   SendMessageRequest(                                                        │
+│       id=str(uuid4()),                                                       │
+│       params=MessageSendParams(message=message_obj)                          │
+│   )                                                                          │
+└─────────────────────────────────────────────────────────────────────────────┘
+
+Response Extraction:
+┌─────────────────────────────────────────────────────────────────────────────┐
+│ # A2A responses are nested Pydantic models                                   │
+│ response_text = ""                                                           │
+│ if hasattr(response.root, 'result'):                                         │
+│     result = response.root.result                                            │
+│     if hasattr(result, 'artifact') and result.artifact:                      │
+│         for part in result.artifact.parts:                                   │
+│             if hasattr(part.root, 'text'):                                   │
+│                 response_text += part.root.text                              │
+└─────────────────────────────────────────────────────────────────────────────┘
+
+```

@@ -1,0 +1,166 @@
+┌──────────────────────────────────────────────────────────────────────────┐
+│                                                                          │
+│          Anthropic Agent + MCP Server Integration Flow                  │
+│                                                                          │
+└──────────────────────────────────────────────────────────────────────────┘
+
+┌─────────────────────────────────────────────────────────────────────────┐
+│  USER INPUT                                                             │
+│  "Can you connect me with @financial-analyst-001 for help?"            │
+└─────────────────────────────────────────────────────────────────────────┘
+                                    │
+                                    ▼
+┌─────────────────────────────────────────────────────────────────────────┐
+│  STEP 1: Agent Mention Detection                                        │
+│  ─────────────────────────────────                                      │
+│                                                                          │
+│  Regex Pattern: @([\w\-]+)                                              │
+│                                                                          │
+│  Extracted: ["financial-analyst-001"]                                   │
+└─────────────────────────────────────────────────────────────────────────┘
+                                    │
+                                    ▼
+┌─────────────────────────────────────────────────────────────────────────┐
+│  STEP 2: MCP Server Connection                                          │
+│  ────────────────────────────────                                       │
+│                                                                          │
+│  StdioServerParameters(                                                 │
+│    command="python",                                                    │
+│    args=["src/agent_mcp.py"],                                          │
+│    env={"ATLAS_URL": "mongodb+srv://..."}                              │
+│  )                                                                       │
+│                                                                          │
+│  Status: ✓ Connected to MCP Server                                     │
+└─────────────────────────────────────────────────────────────────────────┘
+                                    │
+                                    ▼
+┌─────────────────────────────────────────────────────────────────────────┐
+│  STEP 3: Call MCP Tool - get_agent                                      │
+│  ──────────────────────────────────────                                 │
+│                                                                          │
+│  await session.call_tool(                                               │
+│    "get_agent",                                                         │
+│    arguments={"agent_id": "financial-analyst-001"}                     │
+│  )                                                                       │
+└─────────────────────────────────────────────────────────────────────────┘
+                                    │
+                                    ▼
+┌─────────────────────────────────────────────────────────────────────────┐
+│  STEP 4: MCP Server → MongoDB Query                                     │
+│  ───────────────────────────────────                                    │
+│                                                                          │
+│  agents.find_one(                                                       │
+│    {"agent_id": "financial-analyst-001"},                              │
+│    {"_id": 0}                                                           │
+│  )                                                                       │
+│                                                                          │
+│  ┌──────────────────────────────────────────┐                          │
+│  │  MongoDB: nanda_simulation.index         │                          │
+│  │  ────────────────────────────────        │                          │
+│  │  {                                       │                          │
+│  │    "agent_id": "financial-analyst-001",  │                          │
+│  │    "agent_url": "http://192.168.1.100:8080", │                      │
+│  │    "agentFactsURL": "https://list39.org/@..." │                     │
+│  │  }                                       │                          │
+│  └──────────────────────────────────────────┘                          │
+└─────────────────────────────────────────────────────────────────────────┘
+                                    │
+                                    ▼
+┌─────────────────────────────────────────────────────────────────────────┐
+│  STEP 5: Build Enhanced Prompt                                          │
+│  ───────────────────────────────                                        │
+│                                                                          │
+│  --- Agent Information from Registry ---                                │
+│                                                                          │
+│  @financial-analyst-001:                                                │
+│    - Agent URL: http://192.168.1.100:8080                              │
+│    - AgentFacts URL: https://list39.org/@financial_analyst_001.json   │
+│                                                                          │
+│  --- End of Agent Information ---                                       │
+│                                                                          │
+│  Can you connect me with @financial-analyst-001 for help?              │
+└─────────────────────────────────────────────────────────────────────────┘
+                                    │
+                                    ▼
+┌─────────────────────────────────────────────────────────────────────────┐
+│  STEP 6: Call Anthropic Claude API                                      │
+│  ───────────────────────────────────                                    │
+│                                                                          │
+│  anthropic.messages.create(                                             │
+│    model="claude-3-5-sonnet-20241022",                                 │
+│    system="You are an intelligent agent coordinator...",               │
+│    messages=[{"role": "user", "content": enhanced_prompt}]             │
+│  )                                                                       │
+└─────────────────────────────────────────────────────────────────────────┘
+                                    │
+                                    ▼
+┌─────────────────────────────────────────────────────────────────────────┐
+│  STEP 7: Claude's Response                                              │
+│  ──────────────────────────                                             │
+│                                                                          │
+│  "I can help you connect with the Financial Analyst agent. Based on    │
+│  the registry information, this agent is available at:                  │
+│                                                                          │
+│  http://192.168.1.100:8080                                             │
+│                                                                          │
+│  You can send requests to this endpoint to interact with the agent.    │
+│  For detailed information about their capabilities, you can also       │
+│  check their AgentFacts profile at:                                    │
+│                                                                          │
+│  https://list39.org/@financial_analyst_001.json                        │
+│                                                                          │
+│  Would you like me to help you formulate a request to send to this     │
+│  agent?"                                                                │
+└─────────────────────────────────────────────────────────────────────────┘
+
+
+═════════════════════════════════════════════════════════════════════════
+                            KEY COMPONENTS
+═════════════════════════════════════════════════════════════════════════
+
+1. User Input Processing
+   ├─ Regex-based agent mention detection
+   ├─ Filtering of non-agent patterns
+   └─ Extraction of agent IDs
+
+2. MCP Integration
+   ├─ Stdio-based communication
+   ├─ Async/await pattern
+   └─ Tool invocation (get_agent)
+
+3. Registry Lookup
+   ├─ MongoDB query via MCP server
+   ├─ Agent information retrieval
+   └─ Error handling for missing agents
+
+4. Context Enhancement
+   ├─ Agent info formatting
+   ├─ Prompt augmentation
+   └─ Clear structure for Claude
+
+5. Claude Processing
+   ├─ Enhanced prompt with agent context
+   ├─ System message for agent coordination
+   └─ Intelligent response generation
+
+═════════════════════════════════════════════════════════════════════════
+                         EXAMPLE VARIATIONS
+═════════════════════════════════════════════════════════════════════════
+
+Multiple Agents:
+  Input:  "Connect @agent-1 and @agent-2"
+  Result: Both agents looked up, context provided for each
+
+No Agents:
+  Input:  "What is the weather today?"
+  Result: Normal Claude response without registry lookup
+
+Agent Not Found:
+  Input:  "Use @nonexistent-agent"
+  Result: Claude informed agent not found in registry
+
+Complex Query:
+  Input:  "Compare @agent-1 vs @agent-2 capabilities"
+  Result: Both agents looked up, comparative analysis provided
+
+═════════════════════════════════════════════════════════════════════════

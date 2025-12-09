@@ -1,0 +1,283 @@
+┌──────────────────────────────────────────────────────────────────────────┐
+│                                                                          │
+│     Native Tool Calling vs Manual Pattern Matching - Comparison         │
+│                                                                          │
+└──────────────────────────────────────────────────────────────────────────┘
+
+
+══════════════════════════════════════════════════════════════════════════
+                    NATIVE TOOL CALLING (RECOMMENDED) ⭐
+══════════════════════════════════════════════════════════════════════════
+
+User Input:
+  "Tell me about financial-analyst-001"
+  "What agents can help with data analysis?"
+  "List all registered agents"
+
+         ↓ No preprocessing needed
+
+┌────────────────────────────────────────────────────────────────────────┐
+│  1. MCP Connection Setup                                               │
+│  ─────────────────────────                                             │
+│                                                                         │
+│  await mcp_session.list_tools()  # Get available MCP tools            │
+│                                                                         │
+│  Tools Available:                                                      │
+│    - register_agent                                                    │
+│    - list_agents                                                       │
+│    - search_agents                                                     │
+│    - get_agent         ← Claude can see and use any of these         │
+│    - update_agent                                                      │
+│    - delete_agent                                                      │
+│    - get_agent_facts                                                   │
+│    - health_check                                                      │
+└────────────────────────────────────────────────────────────────────────┘
+
+         ↓
+
+┌────────────────────────────────────────────────────────────────────────┐
+│  2. Claude API Call with Tools                                         │
+│  ────────────────────────────────                                      │
+│                                                                         │
+│  anthropic.messages.create(                                            │
+│    model="claude-3-5-sonnet-20241022",                                │
+│    messages=[{"role": "user", "content": user_input}],                │
+│    tools=mcp_tools  # ← Claude sees all available tools              │
+│  )                                                                      │
+│                                                                         │
+│  Claude's Internal Process:                                            │
+│    "The user wants info about financial-analyst-001"                  │
+│    "I have a get_agent tool that can retrieve agent details"          │
+│    "I'll call get_agent with agent_id='financial-analyst-001'"       │
+└────────────────────────────────────────────────────────────────────────┘
+
+         ↓
+
+┌────────────────────────────────────────────────────────────────────────┐
+│  3. Claude Returns tool_use                                            │
+│  ─────────────────────────                                             │
+│                                                                         │
+│  response.stop_reason == "tool_use"                                    │
+│                                                                         │
+│  Tool Use Block:                                                       │
+│  {                                                                      │
+│    "type": "tool_use",                                                 │
+│    "name": "get_agent",                                                │
+│    "input": {"agent_id": "financial-analyst-001"}                     │
+│  }                                                                      │
+│                                                                         │
+│  ✓ Claude decided which tool to use                                   │
+│  ✓ Claude determined the parameters                                   │
+└────────────────────────────────────────────────────────────────────────┘
+
+         ↓
+
+┌────────────────────────────────────────────────────────────────────────┐
+│  4. Execute MCP Tool                                                   │
+│  ──────────────────────                                                │
+│                                                                         │
+│  result = await mcp_session.call_tool(                                │
+│    "get_agent",                                                        │
+│    arguments={"agent_id": "financial-analyst-001"}                    │
+│  )                                                                      │
+│                                                                         │
+│  Result:                                                               │
+│  {                                                                      │
+│    "agent_id": "financial-analyst-001",                               │
+│    "agent_url": "http://192.168.1.100:8080",                          │
+│    "agentFactsURL": "https://list39.org/@financial_analyst_001.json" │
+│  }                                                                      │
+└────────────────────────────────────────────────────────────────────────┘
+
+         ↓
+
+┌────────────────────────────────────────────────────────────────────────┐
+│  5. Return Result to Claude                                            │
+│  ─────────────────────────────                                         │
+│                                                                         │
+│  tool_result = {                                                       │
+│    "type": "tool_result",                                              │
+│    "tool_use_id": "...",                                               │
+│    "content": json.dumps(result)                                       │
+│  }                                                                      │
+│                                                                         │
+│  # Send back to Claude for processing                                 │
+└────────────────────────────────────────────────────────────────────────┘
+
+         ↓
+
+┌────────────────────────────────────────────────────────────────────────┐
+│  6. Claude's Final Response                                            │
+│  ─────────────────────────────                                         │
+│                                                                         │
+│  "Based on the registry information, financial-analyst-001 is         │
+│  available at http://192.168.1.100:8080. This agent specializes      │
+│  in financial analysis. You can also view detailed information        │
+│  about their capabilities at their AgentFacts profile:                │
+│  https://list39.org/@financial_analyst_001.json"                     │
+│                                                                         │
+│  ✓ Natural language response                                          │
+│  ✓ Information blended seamlessly                                     │
+└────────────────────────────────────────────────────────────────────────┘
+
+
+══════════════════════════════════════════════════════════════════════════
+                     MANUAL PATTERN MATCHING (LEGACY)
+══════════════════════════════════════════════════════════════════════════
+
+User Input:
+  "Connect me with @financial-analyst-001"  ← Requires @ syntax!
+
+         ↓
+
+┌────────────────────────────────────────────────────────────────────────┐
+│  1. Your Code: Regex Pattern Matching                                  │
+│  ────────────────────────────────────                                  │
+│                                                                         │
+│  pattern = re.compile(r'@([\w\-]+)')                                   │
+│  mentions = pattern.findall(user_input)                                │
+│                                                                         │
+│  Found: ["financial-analyst-001"]                                      │
+│                                                                         │
+│  ✗ Users must know to use @ syntax                                    │
+│  ✗ Your code must parse and filter                                    │
+└────────────────────────────────────────────────────────────────────────┘
+
+         ↓
+
+┌────────────────────────────────────────────────────────────────────────┐
+│  2. Your Code: Call MCP Tool                                           │
+│  ──────────────────────────────                                        │
+│                                                                         │
+│  for agent_id in mentions:                                             │
+│    result = await mcp_session.call_tool(                              │
+│      "get_agent",                                                      │
+│      arguments={"agent_id": agent_id}                                 │
+│    )                                                                    │
+│                                                                         │
+│  ✗ You decide which tool to call                                      │
+│  ✗ You must handle errors and edge cases                              │
+└────────────────────────────────────────────────────────────────────────┘
+
+         ↓
+
+┌────────────────────────────────────────────────────────────────────────┐
+│  3. Your Code: Build Enhanced Prompt                                   │
+│  ──────────────────────────────────────                                │
+│                                                                         │
+│  context = "--- Agent Information ---\n"                               │
+│  context += f"@{agent_id}: URL={agent_url}\n"                         │
+│  context += "---\n"                                                    │
+│  enhanced_prompt = context + user_input                                │
+│                                                                         │
+│  ✗ Manual context formatting                                          │
+│  ✗ More code to maintain                                              │
+└────────────────────────────────────────────────────────────────────────┘
+
+         ↓
+
+┌────────────────────────────────────────────────────────────────────────┐
+│  4. Call Claude (No Tools)                                             │
+│  ────────────────────────                                              │
+│                                                                         │
+│  anthropic.messages.create(                                            │
+│    model="claude-3-5-sonnet-20241022",                                │
+│    messages=[{"role": "user", "content": enhanced_prompt}]            │
+│    # ← No tools parameter!                                            │
+│  )                                                                      │
+│                                                                         │
+│  ✗ Claude doesn't know about available tools                          │
+│  ✗ Can't make additional tool calls if needed                         │
+└────────────────────────────────────────────────────────────────────────┘
+
+         ↓
+
+┌────────────────────────────────────────────────────────────────────────┐
+│  5. Claude's Response                                                  │
+│  ─────────────────────                                                 │
+│                                                                         │
+│  "Based on the information provided, financial-analyst-001 is         │
+│  available at http://192.168.1.100:8080..."                           │
+│                                                                         │
+│  ⚠️  Limited to context you provided                                  │
+│  ⚠️  Can't explore or call other tools                                │
+└────────────────────────────────────────────────────────────────────────┘
+
+
+══════════════════════════════════════════════════════════════════════════
+                            KEY DIFFERENCES
+══════════════════════════════════════════════════════════════════════════
+
+┌────────────────────────┬────────────────────┬─────────────────────────┐
+│ Aspect                 │ Native Tool Calling│ Manual Pattern Matching │
+├────────────────────────┼────────────────────┼─────────────────────────┤
+│ Who Decides?           │ Claude             │ Your regex code         │
+│ User Input             │ Natural language   │ Must use @ syntax       │
+│ Tool Discovery         │ Automatic          │ Hardcoded in your code  │
+│ Multi-tool Calls       │ Yes, automatically │ No, one-time only       │
+│ Error Handling         │ Claude handles     │ You must handle         │
+│ Code Complexity        │ Simple, clean      │ More complex            │
+│ Maintenance            │ Easy               │ More work               │
+│ MCP Standard           │ ✓ Yes              │ ✗ No                    │
+│ Flexibility            │ ✓ High             │ ✗ Low                   │
+└────────────────────────┴────────────────────┴─────────────────────────┘
+
+
+══════════════════════════════════════════════════════════════════════════
+                         EXAMPLE COMPARISONS
+══════════════════════════════════════════════════════════════════════════
+
+Query: "Show me agents for financial analysis"
+
+Native Tool Calling:
+  ✓ Works! Claude calls search_agents automatically
+  ✓ Natural language query
+
+Manual Pattern Matching:
+  ✗ Fails! No @ symbol detected
+  ✗ User must rephrase to use @ syntax
+
+
+Query: "Tell me about @agent-123 and check system health"
+
+Native Tool Calling:
+  ✓ Claude calls get_agent("agent-123")
+  ✓ Then calls health_check()
+  ✓ Two tools in one conversation
+
+Manual Pattern Matching:
+  ⚠️ Only gets @agent-123 info
+  ✗ Ignores "check system health"
+  ✗ Can't make second tool call
+
+
+Query: "Are there any agents online?"
+
+Native Tool Calling:
+  ✓ Claude decides to call list_agents
+  ✓ Provides comprehensive answer
+
+Manual Pattern Matching:
+  ✗ No @ detected, does nothing
+  ✗ Claude has no registry info
+
+
+══════════════════════════════════════════════════════════════════════════
+                              RECOMMENDATION
+══════════════════════════════════════════════════════════════════════════
+
+USE NATIVE TOOL CALLING (mcp_native_tool_calling.py)
+
+Why?
+✓ Simpler code (less maintenance)
+✓ Better user experience (natural language)
+✓ Follows MCP best practices
+✓ More powerful (multi-turn tool calls)
+✓ Future-proof (works with new tools automatically)
+
+When to use Manual Pattern Matching?
+- Only if you specifically need @ syntax for other reasons
+- When building integrations with existing @ mention systems
+- For learning purposes (understanding the basics)
+
+══════════════════════════════════════════════════════════════════════════

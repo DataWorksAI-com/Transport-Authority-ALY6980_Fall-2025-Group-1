@@ -1,0 +1,22 @@
+# Requirements for Anthropic Agent Examples
+# Install with: pip install -r examples/requirements-examples.txt
+
+# Core dependencies (from main requirements)
+fastmcp>=2.13.0.2
+pymongo>=4.15.3
+requests>=2.32.5
+
+# Anthropic SDK
+anthropic>=0.72.0
+
+# MCP SDK for client functionality
+mcp>=1.20.0
+
+# A2A SDK for agent-to-agent communication
+a2a-sdk>=0.3.10
+
+# HTTP client for A2A
+httpx>=0.28.1
+
+# Environment variable management
+python-dotenv>=1.2.1

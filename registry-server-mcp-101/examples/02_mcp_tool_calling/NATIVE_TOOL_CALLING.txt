@@ -1,0 +1,249 @@
+┌──────────────────────────────────────────────────────────────────────────┐
+│                                                                          │
+│  ✅ Native MCP Tool Calling Example Created!                            │
+│                                                                          │
+└──────────────────────────────────────────────────────────────────────────┘
+
+🎯 WHAT'S NEW:
+══════════════════════════════════════════════════════════════════════════
+
+Created a PROPER MCP integration example that follows the standard pattern:
+
+  User Request → Claude Sees MCP Tools → Claude Calls Tools → Response
+
+✅ examples/mcp_native_tool_calling.py
+   └─ The correct way to integrate Claude with MCP
+   └─ ~280 lines of clean, well-documented code
+   └─ Claude automatically decides when to call tools
+
+✅ examples/COMPARISON.txt
+   └─ Visual comparison of both approaches
+   └─ Shows why native tool calling is better
+
+📝 Updated examples/README.md
+   └─ Reorganized with Native Tool Calling as #1
+   └─ Added comparison table
+   └─ Updated usage patterns
+
+
+🔑 KEY CONCEPT:
+══════════════════════════════════════════════════════════════════════════
+
+The Problem with the Old Approach:
+  ❌ Your code used regex to detect @agent-name
+  ❌ Your code manually called MCP tools
+  ❌ Claude never knew about available tools
+
+The Correct MCP Pattern:
+  ✅ Claude sees all available MCP tools
+  ✅ Claude decides when to call tools
+  ✅ Claude can make multiple tool calls
+  ✅ Natural language queries (no special syntax)
+
+
+🚀 HOW IT WORKS:
+══════════════════════════════════════════════════════════════════════════
+
+1. Connect to MCP Server
+   ├─ await mcp_session.list_tools()
+   └─ Get all available tools (register_agent, get_agent, etc.)
+
+2. Convert Tools to Anthropic Format
+   ├─ Each MCP tool becomes an Anthropic tool schema
+   └─ Claude sees: name, description, parameters
+
+3. User Makes Request (Natural Language)
+   └─ "Tell me about financial-analyst-001"
+
+4. Call Claude with Tools
+   ├─ anthropic.messages.create(..., tools=mcp_tools)
+   └─ Claude analyzes request + available tools
+
+5. Claude Returns tool_use
+   ├─ response.stop_reason == "tool_use"
+   ├─ Claude chose: get_agent
+   └─ Claude provided: {"agent_id": "financial-analyst-001"}
+
+6. Execute the Tool
+   ├─ await mcp_session.call_tool(name, arguments)
+   └─ Get result from MCP server
+
+7. Return Result to Claude
+   ├─ Send tool result back
+   └─ Claude processes and responds
+
+8. Claude's Final Response
+   └─ Natural language with blended information
+
+
+💡 EXAMPLE FLOW:
+══════════════════════════════════════════════════════════════════════════
+
+You: "What agents are available for financial analysis?"
+
+Claude's Internal Process:
+  1. "User wants to find agents"
+  2. "I have a search_agents tool"
+  3. "I'll call it with query='financial'"
+  
+🔧 Claude calls: search_agents(query="financial")
+
+MCP Server returns:
+  {
+    "agents": [...],
+    "count": 2
+  }
+
+Claude's Response:
+  "I found 2 agents for financial analysis:
+   1. financial-analyst-001 at http://...
+   2. financial-expert-002 at http://...
+   Would you like more details about either one?"
+
+✓ No @ syntax required!
+✓ Natural conversation!
+✓ Claude handled everything!
+
+
+📊 COMPARISON:
+══════════════════════════════════════════════════════════════════════════
+
+                 Native Tool Calling    Manual Regex
+User Input       Natural language      Must use @syntax
+Flexibility      ✓ Any query          ✗ Only @ patterns  
+Maintenance      ✓ Minimal            ⚠️ More complex
+Multi-turn       ✓ Automatic          ✗ Manual state mgmt
+Tool Discovery   ✓ Claude explores    ✗ Hardcoded
+MCP Standard     ✓ Yes                ✗ No
+Code Complexity  ✓ Simple (~280 LOC)  ⚠️ Complex (~350 LOC)
+
+
+🎓 WHEN TO USE EACH:
+══════════════════════════════════════════════════════════════════════════
+
+Use Native Tool Calling (mcp_native_tool_calling.py):
+  ✓ Most production use cases
+  ✓ When you want natural language queries
+  ✓ When building new MCP integrations
+  ✓ When you want the simplest solution
+  ✓ When following MCP best practices
+
+Use Manual Pattern Matching (simple_agent_lookup.py):
+  ⚠️ Only if you specifically need @ syntax
+  ⚠️ Integrating with existing @ mention systems
+  ⚠️ Learning/educational purposes
+  ⚠️ When you need explicit control over timing
+
+
+🚀 QUICK START:
+══════════════════════════════════════════════════════════════════════════
+
+1. Set Environment Variables:
+   export ANTHROPIC_API_KEY="sk-ant-..."
+   export ATLAS_URL="mongodb+srv://..."
+
+2. Run the Example:
+   python examples/mcp_native_tool_calling.py
+
+3. Choose Interactive Mode (option 1)
+
+4. Try These Queries:
+   - "What agents are registered?"
+   - "Tell me about financial-analyst-001"
+   - "Search for agents with data analysis capabilities"
+   - "Is the system healthy?"
+
+
+📁 FILE ORGANIZATION:
+══════════════════════════════════════════════════════════════════════════
+
+examples/
+├── mcp_native_tool_calling.py    ⭐ THE RECOMMENDED WAY
+│   ├── MCPAwareAgent class
+│   ├── convert_mcp_tools_to_anthropic_format()
+│   ├── process_message()        # Agentic loop
+│   └── chat_loop()              # Interactive mode
+│
+├── simple_agent_lookup.py        # Manual pattern matching
+│   ├── extract_agent_mentions()  # Regex parsing
+│   └── lookup_agent_via_mcp()   # Manual tool call
+│
+├── anthropic_agent_example.py    # Full manual example
+│   └── AgentAwareClaude class   # Advanced manual control
+│
+├── COMPARISON.txt                # Visual comparison
+├── README.md                     # Updated documentation
+└── test_examples.py             # Test suite
+
+
+🎯 CODE HIGHLIGHTS:
+══════════════════════════════════════════════════════════════════════════
+
+Key Function: process_message()
+
+async def process_message(self, user_message, ...):
+    # 1. Convert MCP tools to Anthropic format
+    tools = self.convert_mcp_tools_to_anthropic_format()
+    
+    # 2. Agentic loop
+    while iteration < max_iterations:
+        # 3. Call Claude with tools
+        response = self.anthropic.messages.create(
+            ...,
+            tools=tools  # ← Claude sees all MCP tools
+        )
+        
+        # 4. If Claude wants to use tools
+        if response.stop_reason == "tool_use":
+            # 5. Execute each tool Claude requested
+            for tool_use in response.content:
+                result = await mcp_session.call_tool(
+                    tool_use.name,
+                    tool_use.input
+                )
+                # 6. Return result to Claude
+            
+            # 7. Continue loop for Claude to process results
+            continue
+        
+        # 8. Claude is done, return final response
+        return final_text
+
+
+✨ BENEFITS:
+══════════════════════════════════════════════════════════════════════════
+
+✓ Natural Language: Users don't need to learn special syntax
+✓ Automatic Tool Selection: Claude picks the right tool
+✓ Multi-turn Conversations: Claude can call multiple tools
+✓ Error Handling: Claude handles failures gracefully
+✓ Extensible: New MCP tools work automatically
+✓ MCP Standard: Follows official best practices
+✓ Less Code: Simpler than manual parsing
+✓ More Maintainable: Less custom logic to update
+
+
+📚 DOCUMENTATION:
+══════════════════════════════════════════════════════════════════════════
+
+examples/README.md            - Complete guide (updated)
+examples/COMPARISON.txt        - Visual comparison
+examples/mcp_native_tool_calling.py - Well-commented code
+examples/test_examples.py     - Test your setup
+
+
+🎉 SUMMARY:
+══════════════════════════════════════════════════════════════════════════
+
+You now have THE PROPER way to integrate Claude with MCP:
+
+✅ Claude sees MCP tools
+✅ Claude decides when to call them
+✅ Natural language queries
+✅ Follows MCP best practices
+✅ Simpler and more powerful
+
+The old regex approach is still available for learning, but use
+mcp_native_tool_calling.py for production!
+
+══════════════════════════════════════════════════════════════════════════

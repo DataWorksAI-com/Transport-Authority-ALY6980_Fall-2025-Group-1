@@ -1,0 +1,22 @@
+[project]
+name = "registry-server"
+version = "0.1.0"
+description = "NANDA Registry Server with FastAPI and MCP support"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "fastapi>=0.120.4",
+    "uvicorn[standard]>=0.38.0",
+    "pymongo>=4.15.3",
+    "requests>=2.32.5",
+    "pydantic>=2.12.3",
+    "fastmcp>=2.13.0.2",
+    "anthropic>=0.72.0",
+    "python-dotenv>=1.2.1",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.4.2",
+    "httpx>=0.28.1",
+]

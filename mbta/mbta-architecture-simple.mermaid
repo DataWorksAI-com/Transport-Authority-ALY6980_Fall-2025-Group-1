@@ -1,0 +1,85 @@
+graph TB
+    subgraph "User Interface"
+        USER["👤 User Query"]
+    end
+    
+    subgraph "🎯 Exchange Agent - Protocol Gateway"
+        INTENT["🧠 Intent Classification<br/>Embedding Similarity<br/>Confidence: 0.0-1.0"]
+        DECISION{"Confidence > 0.80?"}
+    end
+    
+    subgraph "⚡ MCP Fast Path - 400ms"
+        MCP["MCP Protocol<br/>━━━━━━━━━━━<br/>32 Tools Available<br/>stdio Transport<br/>━━━━━━━━━━━<br/>mbta_get_alerts<br/>mbta_search_stops<br/>mbta_plan_trip<br/>+ 29 more"]
+    end
+    
+    subgraph "🔄 A2A Agent Path - 1500ms"
+        STATEGRAPH["StateGraph Orchestrator<br/>━━━━━━━━━━━<br/>Conditional Workflow<br/>Multi-Agent Coordination"]
+        
+        AGENT1["🚨 Alerts<br/>Agent"]
+        AGENT2["🚏 Stops<br/>Agent"]
+        AGENT3["🗺️ Planner<br/>Agent"]
+    end
+    
+    subgraph "External Data"
+        API["🚇 MBTA API<br/>Real-time Transit Data"]
+    end
+    
+    subgraph "📊 Observability"
+        TRACES["Jaeger - Distributed Tracing<br/>4 Services × Multiple Spans"]
+    end
+    
+    %% Flow
+    USER -->|Query| INTENT
+    INTENT -->|"Intent + Confidence"| DECISION
+    
+    DECISION -->|"YES<br/>Simple Query<br/>High Confidence"| MCP
+    DECISION -->|"NO<br/>Complex Query<br/>Low Confidence"| STATEGRAPH
+    
+    MCP -->|"Direct Tool Call"| API
+    API -->|"Data"| MCP
+    MCP -->|"~400ms"| USER
+    
+    STATEGRAPH --> AGENT1
+    STATEGRAPH --> AGENT2
+    STATEGRAPH --> AGENT3
+    
+    AGENT1 --> API
+    AGENT2 --> API
+    AGENT3 --> API
+    
+    API --> AGENT1
+    API --> AGENT2
+    API --> AGENT3
+    
+    AGENT1 --> STATEGRAPH
+    AGENT2 --> STATEGRAPH
+    AGENT3 --> STATEGRAPH
+    
+    STATEGRAPH -->|"~1500ms"| USER
+    
+    MCP -.->|"Error"| STATEGRAPH
+    
+    INTENT -.-> TRACES
+    MCP -.-> TRACES
+    STATEGRAPH -.-> TRACES
+    AGENT1 -.-> TRACES
+    AGENT2 -.-> TRACES
+    AGENT3 -.-> TRACES
+    
+    %% Annotations
+    MCP -.->|"25x Faster<br/>for Simple Queries"| NOTE1[ ]
+    
+    %% Styling
+    classDef mcpStyle fill:#dcfce7,stroke:#15803d,stroke-width:4px,color:#000,font-weight:bold
+    classDef a2aStyle fill:#dbeafe,stroke:#1e40af,stroke-width:4px,color:#000,font-weight:bold
+    classDef gatewayStyle fill:#fce7f3,stroke:#9f1239,stroke-width:4px,color:#000,font-weight:bold
+    classDef externalStyle fill:#fee2e2,stroke:#dc2626,stroke-width:3px,color:#000
+    classDef observabilityStyle fill:#f3e8ff,stroke:#7c3aed,stroke-width:2px,color:#000
+    
+    class MCP mcpStyle
+    class STATEGRAPH,AGENT1,AGENT2,AGENT3 a2aStyle
+    class INTENT,DECISION gatewayStyle
+    class API externalStyle
+    class TRACES observabilityStyle
+    
+    style NOTE1 fill:none,stroke:none

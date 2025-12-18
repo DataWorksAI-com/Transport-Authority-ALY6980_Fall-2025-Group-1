@@ -1,0 +1,182 @@
+{
+  "f8c33a00c0b03a4ade2496650d02b455": {
+    "query": "green line delays",
+    "intent": "alerts",
+    "confidence": 0.95,
+    "method": "llm"
+  },
+  "f9d40dc6f4312421edba9f6310d49b4c": {
+    "query": "how do I get from park street to harvard",
+    "intent": "trip_planning",
+    "confidence": 0.95,
+    "method": "llm"
+  },
+  "88f50ac6261ac1dcc24f999be4ded4f3": {
+    "query": "i wanna go to park street from northeastern university",
+    "intent": "trip_planning",
+    "confidence": 0.95,
+    "method": "llm"
+  },
+  "53134fbdd5822ea74274b3ce2208b197": {
+    "query": "how do i get from park street to northeastern university",
+    "intent": "trip_planning",
+    "confidence": 0.95,
+    "method": "llm"
+  },
+  "905411435bda9cea6e664b0be47ee79d": {
+    "query": "is the red line running smoothly today",
+    "intent": "alerts",
+    "confidence": 0.9,
+    "method": "llm"
+  },
+  "1475eb6d8db76a6eb2b61516d37ea430": {
+    "query": "lets go to northeastern university i am in park street",
+    "intent": "trip_planning",
+    "confidence": 0.95,
+    "method": "llm"
+  },
+  "7597dab7ec497da69cc40f6d0493f4bb": {
+    "query": "red line delays",
+    "intent": "alerts",
+    "confidence": 0.95,
+    "method": "llm"
+  },
+  "a118b710ce7879f8dcf2985b5086ca3b": {
+    "query": "how many stops are there in green line",
+    "intent": "stops",
+    "confidence": 0.9,
+    "method": "llm"
+  },
+  "d63191ce4003d25dcec088b814b07680": {
+    "query": "how many  stops are there between norhteastern university and park street",
+    "intent": "trip_planning",
+    "confidence": 0.9,
+    "method": "llm"
+  },
+  "0c6d374843d0dc31b724ab34a0431d19": {
+    "query": "how many  stops are there between northeastern university and park street",
+    "intent": "trip_planning",
+    "confidence": 0.9,
+    "method": "llm"
+  },
+  "01d35666581d37ba3de9741c1122ee0a": {
+    "query": "how are you doing",
+    "intent": "general",
+    "confidence": 0.1,
+    "method": "llm"
+  },
+  "8427da55ecb383a80ba0c0d5f1b38466": {
+    "query": "who is usa's president",
+    "intent": "general",
+    "confidence": 0.1,
+    "method": "llm"
+  },
+  "755f85c2723bb39381c7379a604160d8": {
+    "query": "good",
+    "intent": "general",
+    "confidence": 0.1,
+    "method": "llm"
+  },
+  "c6f02d5ae435847a6456ca06bb5a9c8c": {
+    "query": "orange line delays?",
+    "intent": "alerts",
+    "confidence": 0.95,
+    "method": "llm"
+  },
+  "27437952e7522a10916f40c1e8e43593": {
+    "query": "how do i get to park street from northeastern university",
+    "intent": "trip_planning",
+    "confidence": 0.95,
+    "method": "llm"
+  },
+  "bd0f4ff3e3d525ca529c0999fab526c1": {
+    "query": "weather today?",
+    "intent": "general",
+    "confidence": 0.2,
+    "method": "llm"
+  },
+  "d2ad2eea929e50a50e365f9e5615f329": {
+    "query": "from kenmore to airport",
+    "intent": "trip_planning",
+    "confidence": 0.95,
+    "method": "llm"
+  },
+  "f40f5a7a2fcd40a83bfeafab99c859b9": {
+    "query": "i want to get to airport from kenmore",
+    "intent": "trip_planning",
+    "confidence": 0.95,
+    "method": "llm"
+  },
+  "dc5d2b1630f2857a520d5b270d1a83e8": {
+    "query": "i want to get to boston logan airport from kenmore",
+    "intent": "trip_planning",
+    "confidence": 0.95,
+    "method": "llm"
+  },
+  "d878e2bd72bcd36143e6e318388f28f3": {
+    "query": "How do I get from Harvard to MIT?",
+    "intent": "trip_planning",
+    "confidence": 0.95,
+    "method": "llm"
+  },
+  "b63ce2e9050eefcbde0176d60407d474": {
+    "query": "i wanna go to northeastern university from park street",
+    "intent": "trip_planning",
+    "confidence": 0.95,
+    "method": "llm"
+  },
+  "fbadba82e0bf56228e6a01149ae440ec": {
+    "query": "orange line delays",
+    "intent": "alerts",
+    "confidence": 0.95,
+    "method": "llm"
+  },
+  "a12c178fc6616719dbf5624d0625aa74": {
+    "query": "i wanna go to northeastern university from park street and then to kenmore",
+    "intent": "trip_planning",
+    "confidence": 0.95,
+    "method": "llm"
+  },
+  "6f87d635eddf9a21c7431e4cb94edf01": {
+    "query": "Red Line delays?",
+    "intent": "alerts",
+    "confidence": 0.95,
+    "method": "llm"
+  },
+  "6260e9dfc8e5f50b3221cdc09f54a46c": {
+    "query": "Orange Line alerts",
+    "intent": "alerts",
+    "confidence": 0.95,
+    "method": "llm"
+  },
+  "11098f125ae667301721b6bba97c7d50": {
+    "query": "Blue Line status",
+    "intent": "alerts",
+    "confidence": 0.9,
+    "method": "llm"
+  },
+  "4ff55d78e5377b77fed796bbe3757a56": {
+    "query": "How do I get from Park Street to Harvard?",
+    "intent": "trip_planning",
+    "confidence": 0.95,
+    "method": "llm"
+  },
+  "f32ce5d592f05e3d1a4455279c337b74": {
+    "query": "Are there any delays on the Green Line?",
+    "intent": "alerts",
+    "confidence": 0.95,
+    "method": "llm"
+  },
+  "c7975783a15126e5e57a340543b10246": {
+    "query": "Take me from Harvard to MIT",
+    "intent": "trip_planning",
+    "confidence": 0.95,
+    "method": "llm"
+  },
+  "bfa99df33b137bc8fb5f5407d7e58da8": {
+    "query": "bye",
+    "intent": "general",
+    "confidence": 0.1,
+    "method": "llm"
+  }
+}

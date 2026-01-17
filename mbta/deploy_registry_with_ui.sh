@@ -1,7 +1,7 @@
 #!/bin/bash
 
-# Deploy Northeastern Registry v2 with UI (Fixed MongoDB URI)
-# Usage: bash deploy_registry_with_ui.sh <MONGODB_URL> [REGION] [INSTANCE_TYPE]
+# Deploy Northeastern Registry v3 with Full Description Support
+# Usage: bash deploy_registry_v3.sh <MONGODB_URL> [REGION] [INSTANCE_TYPE]
 
 set -e
 
@@ -12,6 +12,7 @@ ROOT_PASSWORD="${4:-}"
 
 if [ -z "$MONGODB_URL" ]; then
     echo "❌ Usage: $0 <MONGODB_URL> [REGION] [INSTANCE_TYPE]"
+    echo "   Example: bash deploy_registry_v3.sh 'mongodb+srv://user:pass@cluster.mongodb.net/'"
     exit 1
 fi
 
@@ -20,13 +21,13 @@ if [ -z "$ROOT_PASSWORD" ]; then
     echo "🔑 Generated root password: $ROOT_PASSWORD"
 fi
 
-FIREWALL_LABEL="Northeastern-registry-v2"
-SSH_KEY_LABEL="Northeastern-registry-v2-key"
+FIREWALL_LABEL="Northeastern-registry-v3"
+SSH_KEY_LABEL="Northeastern-registry-v3-key"
 IMAGE_ID="linode/ubuntu22.04"
 DEPLOYMENT_ID=$(date +%Y%m%d-%H%M%S)
 
-echo "🗄️ Deploying Northeastern Registry v2 + UI"
-echo "===================================="
+echo "🗄️ Deploying Northeastern Registry v3 (Semantic Discovery Ready)"
+echo "================================================================"
 echo "Deployment ID: $DEPLOYMENT_ID"
 echo ""
 
@@ -71,8 +72,8 @@ INSTANCE_ID=$(linode-cli linodes create \
     --type "$INSTANCE_TYPE" \
     --region "$REGION" \
     --image "$IMAGE_ID" \
-    --label "Northeastern-registry-v2-$DEPLOYMENT_ID" \
-    --tags "Northeastern-Registry,v2" \
+    --label "Northeastern-registry-v3-$DEPLOYMENT_ID" \
+    --tags "Northeastern-Registry,v3,semantic" \
     --root_pass "$ROOT_PASSWORD" \
     --authorized_keys "$(cat ${SSH_KEY_LABEL}.pub)" \
     --firewall_id "$FIREWALL_ID" \
@@ -98,14 +99,15 @@ for i in {1..30}; do
     sleep 10
 done
 
-echo "[6/6] Setting up registry + UI..."
+echo "[6/6] Setting up registry + UI with description support..."
 
-# FIXED: Pass MONGODB_URL without quotes in heredoc to allow expansion
 ssh -i "$SSH_KEY_LABEL" -o StrictHostKeyChecking=no "root@$PUBLIC_IP" bash << REMOTE_SETUP
 set -e
 exec > /var/log/registry-setup.log 2>&1
 
 echo "=== Setup Started ==="
+date
+
 apt-get update -y
 apt-get install -y python3 python3-venv python3-pip supervisor nginx
 
@@ -128,7 +130,6 @@ sudo -u ubuntu bash -c "source .venv/bin/activate && pip install --upgrade pip &
 cat > registry.py << 'REGISTRY_EOF'
 from flask import Flask, request, jsonify
 import os
-import random
 from datetime import datetime
 from flask_cors import CORS
 from typing import Any, Dict, List
@@ -188,7 +189,8 @@ if not TEST_MODE and USE_MONGO and agent_registry_col is not None:
                 "alive": doc.get("alive", False),
                 "assigned_to": doc.get("assigned_to"),
                 "last_update": doc.get("last_update"),
-                "api_url": doc.get("api_url")
+                "api_url": doc.get("api_url"),
+                "description": doc.get("description", "")
             }
         print(f"📚 Loaded {len(registry) - 1} agents")
     except Exception as e:
@@ -216,7 +218,7 @@ def save_client_registry():
             agent_id = client_registry.get('agent_map', {}).get(client_name)
             client_registry_col.update_one(
                 {"client_name": client_name},
-                {"\$set": {"api_url": api_url, "agent_id": agent_id}},
+                {"$set": {"api_url": api_url, "agent_id": agent_id}},
                 upsert=True,
             )
     except Exception as e:
@@ -237,7 +239,7 @@ def save_registry():
             }
             agent_registry_col.update_one(
                 {"agent_id": agent_id},
-                {"\$set": mongo_doc},
+                {"$set": mongo_doc},
                 upsert=True,
             )
     except Exception as e:
@@ -277,7 +279,8 @@ def _build_agent_payload(agent_id: str) -> Dict[str, Any]:
         'assigned_to': status_obj.get('assigned_to'),
         'last_update': status_obj.get('last_update'),
         'capabilities': status_obj.get('capabilities', []),
-        'tags': status_obj.get('tags', [])
+        'tags': status_obj.get('tags', []),
+        'description': status_obj.get('description', '')
     }
 
 @app.route('/search', methods=['GET'])
@@ -360,6 +363,8 @@ def update_agent_status(agent_id):
         status_obj['capabilities'] = data['capabilities']
     if 'tags' in data and isinstance(data['tags'], list):
         status_obj['tags'] = data['tags']
+    if 'description' in data and isinstance(data['description'], str):
+        status_obj['description'] = data['description']
     
     registry['agent_status'][agent_id] = status_obj
     save_registry()
@@ -375,6 +380,7 @@ def register():
     agent_id = data['agent_id']
     agent_url = data['agent_url']
     api_url = data.get('api_url')
+    description = data.get('description', '')
 
     registry[agent_id] = agent_url
 
@@ -385,6 +391,7 @@ def register():
         'alive': False,
         'assigned_to': None,
         'api_url': api_url,
+        'description': description,
         'last_update': datetime.now().isoformat()
     }
 
@@ -397,21 +404,27 @@ def register():
 def lookup(id):
     if id in registry and id != 'agent_status':
         agent_url = registry[id]
-        api_url = registry['agent_status'][id].get('api_url')
+        status_obj = registry['agent_status'].get(id, {})
+        api_url = status_obj.get('api_url')
+        description = status_obj.get('description', '')
         return jsonify({
             "agent_id": id,
             "agent_url": agent_url,
-            "api_url": api_url
+            "api_url": api_url,
+            "description": description
         })
 
     if id in client_registry:
         agent_id = client_registry["agent_map"][id]
         agent_url = registry[agent_id]
         api_url = client_registry[id]
+        status_obj = registry['agent_status'].get(agent_id, {})
+        description = status_obj.get('description', '')
         return jsonify({
             "agent_id": agent_id,
             "agent_url": agent_url,
-            "api_url": api_url
+            "api_url": api_url,
+            "description": description
         })
 
     return jsonify({"error": f"ID '{id}' not found"}), 404
@@ -428,7 +441,7 @@ def list_clients():
 
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', DEFAULT_PORT))
-    print(f"🚀 Northeastern Registry v2 on port {port}")
+    print(f"🚀 Northeastern Registry v3 on port {port}")
     app.run(host='0.0.0.0', port=port)
 REGISTRY_EOF
 
@@ -458,7 +471,7 @@ def create_agent_facts():
     except Exception as e:
         if "duplicate" in str(e):
             agent_name = agent_facts.get("agent_name")
-            facts.update_one({"agent_name": agent_name}, {"\$set": agent_facts})
+            facts.update_one({"agent_name": agent_name}, {"\\$set": agent_facts})
             return jsonify({"status": "success", "message": "updated"})
         return jsonify({"error": str(e)}), 500
 
@@ -493,7 +506,7 @@ cat > registry-ui.html << 'UI_EOF'
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Northeastern Registry Dashboard</title>
+    <title>Northeastern Registry v3 - Semantic Discovery</title>
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
         body {
@@ -511,6 +524,7 @@ cat > registry-ui.html << 'UI_EOF'
             margin-bottom: 30px;
         }
         .header h1 { color: #667eea; font-size: 2.5em; margin-bottom: 10px; }
+        .header .subtitle { color: #666; font-size: 1.1em; }
         .stats {
             display: grid;
             grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
@@ -523,7 +537,8 @@ cat > registry-ui.html << 'UI_EOF'
             border-radius: 15px;
             box-shadow: 0 5px 15px rgba(0,0,0,0.1);
         }
-        .stat-card h3 { color: #667eea; font-size: 2em; }
+        .stat-card h3 { color: #667eea; font-size: 2em; margin-bottom: 5px; }
+        .stat-card p { color: #888; font-size: 0.9em; }
         .controls {
             background: white;
             padding: 25px;
@@ -533,7 +548,14 @@ cat > registry-ui.html << 'UI_EOF'
             gap: 15px;
             flex-wrap: wrap;
         }
-        .controls input { flex: 1; min-width: 200px; padding: 12px; border: 2px solid #e0e0e0; border-radius: 10px; }
+        .controls input { 
+            flex: 1; 
+            min-width: 200px; 
+            padding: 12px; 
+            border: 2px solid #e0e0e0; 
+            border-radius: 10px;
+            font-size: 1em;
+        }
         .btn {
             padding: 12px 25px;
             border: none;
@@ -542,11 +564,12 @@ cat > registry-ui.html << 'UI_EOF'
             font-weight: 600;
             background: #667eea;
             color: white;
+            font-size: 1em;
         }
         .btn:hover { background: #5568d3; }
         .agents-grid {
             display: grid;
-            grid-template-columns: repeat(auto-fill, minmax(350px, 1fr));
+            grid-template-columns: repeat(auto-fill, minmax(400px, 1fr));
             gap: 20px;
         }
         .agent-card {
@@ -556,53 +579,115 @@ cat > registry-ui.html << 'UI_EOF'
             box-shadow: 0 5px 15px rgba(0,0,0,0.1);
             transition: all 0.3s;
         }
-        .agent-card:hover { transform: translateY(-5px); }
-        .agent-id { font-size: 1.2em; font-weight: 700; color: #667eea; margin-bottom: 15px; }
-        .status-badge { padding: 5px 12px; border-radius: 20px; font-size: 0.85em; font-weight: 600; }
+        .agent-card:hover { 
+            transform: translateY(-5px);
+            box-shadow: 0 8px 25px rgba(0,0,0,0.15);
+        }
+        .agent-id { 
+            font-size: 1.3em; 
+            font-weight: 700; 
+            color: #667eea; 
+            margin-bottom: 15px; 
+        }
+        .agent-description { 
+            font-size: 0.95em; 
+            color: #555; 
+            margin: 15px 0; 
+            line-height: 1.6;
+            font-style: italic;
+            padding: 12px;
+            background: #f8f9fa;
+            border-left: 3px solid #667eea;
+            border-radius: 5px;
+        }
+        .status-badge { 
+            padding: 6px 14px; 
+            border-radius: 20px; 
+            font-size: 0.85em; 
+            font-weight: 600;
+            display: inline-block;
+            margin-bottom: 10px;
+        }
         .status-alive { background: #d4edda; color: #155724; }
         .status-offline { background: #f8d7da; color: #721c24; }
-        .info-row { margin: 8px 0; color: #666; }
+        .info-row { 
+            margin: 10px 0; 
+            color: #666; 
+            font-size: 0.9em;
+        }
+        .info-row strong { color: #333; }
         .capability-tag {
-            background: #f0f4ff;
-            color: #667eea;
-            padding: 5px 12px;
+            background: #e7f3ff;
+            color: #0066cc;
+            padding: 6px 12px;
             border-radius: 15px;
-            font-size: 0.85em;
+            font-size: 0.8em;
             display: inline-block;
-            margin: 4px;
+            margin: 4px 4px 4px 0;
+            font-weight: 500;
         }
         .tag-badge {
             background: #fff3cd;
             color: #856404;
-            padding: 5px 12px;
+            padding: 6px 12px;
             border-radius: 15px;
-            font-size: 0.85em;
+            font-size: 0.8em;
             display: inline-block;
-            margin: 4px;
+            margin: 4px 4px 4px 0;
         }
-        .loading { text-align: center; padding: 50px; }
-        .empty-state { text-align: center; padding: 60px; background: white; border-radius: 15px; }
+        .loading { 
+            text-align: center; 
+            padding: 50px;
+            color: white;
+            font-size: 1.2em;
+        }
+        .empty-state { 
+            text-align: center; 
+            padding: 60px; 
+            background: white; 
+            border-radius: 15px;
+        }
+        .empty-state h2 { color: #667eea; margin-bottom: 10px; }
+        .empty-state p { color: #888; }
     </style>
 </head>
 <body>
     <div class="container">
         <div class="header">
-            <h1>🗄️ Northeastern Registry Dashboard</h1>
-            <p style="color: #666;">Real-time Agent Management</p>
+            <h1>🗄️ Northeastern Registry v3</h1>
+            <p class="subtitle">Semantic Agent Discovery Platform</p>
         </div>
+        
         <div class="stats">
-            <div class="stat-card"><h3 id="totalAgents">-</h3><p>Total Agents</p></div>
-            <div class="stat-card"><h3 id="aliveAgents">-</h3><p>Alive Agents</p></div>
-            <div class="stat-card"><h3 id="totalClients">-</h3><p>Total Clients</p></div>
-            <div class="stat-card"><h3 id="mongoStatus">-</h3><p>MongoDB</p></div>
+            <div class="stat-card">
+                <h3 id="totalAgents">-</h3>
+                <p>Total Agents</p>
+            </div>
+            <div class="stat-card">
+                <h3 id="aliveAgents">-</h3>
+                <p>Alive Agents</p>
+            </div>
+            <div class="stat-card">
+                <h3 id="totalClients">-</h3>
+                <p>Total Clients</p>
+            </div>
+            <div class="stat-card">
+                <h3 id="mongoStatus">-</h3>
+                <p>MongoDB</p>
+            </div>
         </div>
+        
         <div class="controls">
-            <input type="text" id="searchInput" placeholder="Search agents..." />
+            <input type="text" id="searchInput" placeholder="Search agents by name or capability..." />
             <button class="btn" onclick="searchAgents()">🔍 Search</button>
             <button class="btn" onclick="loadAgents()">🔄 Refresh</button>
         </div>
-        <div id="agentsContainer"><div class="loading">Loading...</div></div>
+        
+        <div id="agentsContainer">
+            <div class="loading">Loading agents...</div>
+        </div>
     </div>
+    
     <script>
         const REGISTRY_URL = \`http://\${window.location.hostname}:6900\`;
         
@@ -621,19 +706,27 @@ cat > registry-ui.html << 'UI_EOF'
                 document.getElementById('aliveAgents').textContent = stats.alive_agents;
                 document.getElementById('totalClients').textContent = stats.total_clients;
                 document.getElementById('mongoStatus').textContent = stats.mongodb_enabled ? '✅' : '❌';
-            } catch (e) { console.error(e); }
+            } catch (e) {
+                console.error('Failed to load stats:', e);
+            }
         }
         
         async function loadAgents() {
             const container = document.getElementById('agentsContainer');
-            container.innerHTML = '<div class="loading">Loading...</div>';
+            container.innerHTML = '<div class="loading">Loading agents...</div>';
+            
             try {
                 const res = await fetch(\`\${REGISTRY_URL}/list\`);
                 const data = await res.json();
                 const ids = Object.keys(data).filter(id => id !== 'agent_status');
                 
                 if (ids.length === 0) {
-                    container.innerHTML = '<div class="empty-state"><h2>No Agents Registered</h2></div>';
+                    container.innerHTML = \`
+                        <div class="empty-state">
+                            <h2>No Agents Registered</h2>
+                            <p>Register agents using the /register API endpoint</p>
+                        </div>
+                    \`;
                     return;
                 }
                 
@@ -641,41 +734,108 @@ cat > registry-ui.html << 'UI_EOF'
                     try {
                         const r = await fetch(\`\${REGISTRY_URL}/agents/\${id}\`);
                         return r.ok ? await r.json() : null;
-                    } catch { return null; }
+                    } catch (e) {
+                        console.error(\`Failed to fetch agent \${id}:\`, e);
+                        return null;
+                    }
                 }));
                 
                 displayAgents(agents.filter(a => a));
             } catch (e) {
-                container.innerHTML = '<div class="empty-state"><h2>Error Loading</h2></div>';
+                console.error('Failed to load agents:', e);
+                container.innerHTML = \`
+                    <div class="empty-state">
+                        <h2>Error Loading Agents</h2>
+                        <p>\${e.message}</p>
+                    </div>
+                \`;
             }
         }
         
         function displayAgents(agents) {
             const container = document.getElementById('agentsContainer');
+            
+            if (!agents || agents.length === 0) {
+                container.innerHTML = \`
+                    <div class="empty-state">
+                        <h2>No Agents Found</h2>
+                    </div>
+                \`;
+                return;
+            }
+            
             container.innerHTML = '<div class="agents-grid">' + agents.map(a => \`
                 <div class="agent-card">
                     <div class="agent-id">\${a.agent_id}</div>
                     <span class="status-badge \${a.alive ? 'status-alive' : 'status-offline'}">
                         \${a.alive ? '✅ Alive' : '❌ Offline'}
                     </span>
-                    <div class="info-row"><strong>URL:</strong> \${a.agent_url || 'N/A'}</div>
-                    <div class="info-row"><strong>API:</strong> \${a.api_url || 'N/A'}</div>
-                    \${(a.capabilities || []).length > 0 ? '<div style="margin-top: 10px;">' + (a.capabilities || []).map(c => \`<span class="capability-tag">\${c}</span>\`).join('') + '</div>' : ''}
-                    \${(a.tags || []).length > 0 ? '<div style="margin-top: 10px;">' + (a.tags || []).map(t => \`<span class="tag-badge">\${t}</span>\`).join('') + '</div>' : ''}
+                    
+                    \${a.description && a.description.trim() !== '' ? 
+                        '<div class="agent-description">"' + a.description + '"</div>' : 
+                        '<div class="agent-description" style="opacity: 0.5;">No description provided</div>'
+                    }
+                    
+                    <div class="info-row">
+                        <strong>Endpoint:</strong> \${a.agent_url || 'N/A'}
+                    </div>
+                    
+                    \${a.api_url ? 
+                        '<div class="info-row"><strong>API:</strong> ' + a.api_url + '</div>' : ''
+                    }
+                    
+                    <div class="info-row" style="font-size: 0.8em; color: #999;">
+                        Updated: \${a.last_update ? new Date(a.last_update).toLocaleString() : 'Never'}
+                    </div>
+                    
+                    \${(a.capabilities || []).length > 0 ? 
+                        '<div style="margin-top: 15px;">' + 
+                        (a.capabilities || []).map(c => \`<span class="capability-tag">\${c}</span>\`).join('') + 
+                        '</div>' : ''
+                    }
+                    
+                    \${(a.tags || []).length > 0 ? 
+                        '<div style="margin-top: 10px;">' + 
+                        (a.tags || []).map(t => \`<span class="tag-badge">\${t}</span>\`).join('') + 
+                        '</div>' : ''
+                    }
                 </div>
             \`).join('') + '</div>';
         }
         
         async function searchAgents() {
             const query = document.getElementById('searchInput').value.trim();
-            if (!query) { loadAgents(); return; }
+            if (!query) { 
+                loadAgents(); 
+                return; 
+            }
+            
+            const container = document.getElementById('agentsContainer');
+            container.innerHTML = '<div class="loading">Searching...</div>';
             
             try {
-                const res = await fetch(\`\${REGISTRY_URL}/search?q=\${query}\`);
+                const res = await fetch(\`\${REGISTRY_URL}/search?q=\${encodeURIComponent(query)}\`);
                 const agents = await res.json();
                 displayAgents(agents);
-            } catch (e) { console.error(e); }
+            } catch (e) {
+                console.error('Search failed:', e);
+                container.innerHTML = \`
+                    <div class="empty-state">
+                        <h2>Search Error</h2>
+                        <p>\${e.message}</p>
+                    </div>
+                \`;
+            }
         }
+        
+        // Allow Enter key in search box
+        document.addEventListener('DOMContentLoaded', () => {
+            document.getElementById('searchInput').addEventListener('keypress', (e) => {
+                if (e.key === 'Enter') {
+                    searchAgents();
+                }
+            });
+        });
     </script>
 </body>
 </html>
@@ -683,7 +843,6 @@ UI_EOF
 
 chown -R ubuntu:ubuntu /home/ubuntu/Northeastern-registry
 
-# FIXED: Create supervisor configs with proper MongoDB URI
 cat > /etc/supervisor/conf.d/registry.conf << SUPEOF
 [program:registry]
 command=/home/ubuntu/Northeastern-registry/.venv/bin/python registry.py
@@ -720,8 +879,8 @@ server {
     
     location ~ ^/(health|stats|list|register|search|lookup|agents|clients|mcp_servers) {
         proxy_pass http://127.0.0.1:6900;
-        proxy_set_header Host \$host;
-        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_set_header Host \\$host;
+        proxy_set_header X-Real-IP \\$remote_addr;
         add_header Access-Control-Allow-Origin * always;
         add_header Access-Control-Allow-Methods "GET, POST, PUT, DELETE, OPTIONS" always;
     }
@@ -731,11 +890,9 @@ NGINX_EOF
 ln -sf /etc/nginx/sites-available/registry /etc/nginx/sites-enabled/
 rm -f /etc/nginx/sites-enabled/default
 
-# FIX PERMISSIONS - CRITICAL!
 chmod 755 /home/ubuntu
 chmod 755 /home/ubuntu/Northeastern-registry
 chmod 644 /home/ubuntu/Northeastern-registry/registry-ui.html
-echo "✅ Permissions fixed"
 
 systemctl enable supervisor nginx
 systemctl start supervisor nginx
@@ -748,15 +905,14 @@ sleep 10
 echo "=== Setup Complete ==="
 supervisorctl status
 echo ""
-echo "MongoDB URI configured: $MONGODB_URL"
 REMOTE_SETUP
 
 echo ""
 echo "Verifying services..."
 sleep 5
 
-REGISTRY_STATUS=$(ssh -i "$SSH_KEY_LABEL" "root@$PUBLIC_IP" "supervisorctl status registry | grep RUNNING" || echo "FAILED")
-NGINX_STATUS=$(ssh -i "$SSH_KEY_LABEL" "root@$PUBLIC_IP" "systemctl is-active nginx" || echo "FAILED")
+REGISTRY_STATUS=\$(ssh -i "$SSH_KEY_LABEL" "root@$PUBLIC_IP" "supervisorctl status registry | grep RUNNING" || echo "FAILED")
+NGINX_STATUS=\$(ssh -i "$SSH_KEY_LABEL" "root@$PUBLIC_IP" "systemctl is-active nginx" || echo "FAILED")
 
 if [[ "$REGISTRY_STATUS" == "FAILED" ]] || [[ "$NGINX_STATUS" != "active" ]]; then
     echo "⚠️  Warning: Some services may not have started"
@@ -765,33 +921,59 @@ else
     echo "✅ All services running"
 fi
 
-# Verify MongoDB connection
 echo ""
 echo "Testing MongoDB connection..."
-MONGO_STATUS=$(ssh -i "$SSH_KEY_LABEL" "root@$PUBLIC_IP" "curl -s http://localhost:6900/health | grep -o '\"mongo\":[^,]*'" || echo "failed")
+MONGO_STATUS=\$(ssh -i "$SSH_KEY_LABEL" "root@$PUBLIC_IP" "curl -s http://localhost:6900/health | grep -o '\"mongo\":[^,]*'" || echo "failed")
 if [[ "$MONGO_STATUS" == *"true"* ]]; then
     echo "✅ MongoDB connected successfully"
 else
-    echo "⚠️  MongoDB not connected - check Network Access whitelist in MongoDB Atlas"
-    echo "   Whitelist IP: $PUBLIC_IP"
+    echo "⚠️  MongoDB not connected"
+    echo "   Please whitelist IP in MongoDB Atlas Network Access: $PUBLIC_IP"
+    echo "   Go to: https://cloud.mongodb.com → Network Access → Add IP Address"
 fi
 
 echo ""
-echo "🎉 Northeastern Registry v2 + UI Deployed!"
-echo "===================================="
-echo "Instance ID: $INSTANCE_ID"
-echo "Public IP: $PUBLIC_IP"
-echo "Root Password: $ROOT_PASSWORD"
+echo "🎉 ================================================================"
+echo "🎉 Northeastern Registry v3 Deployed!"
+echo "🎉 ================================================================"
 echo ""
-echo "🌐 Access:"
-echo "  Dashboard:  http://$PUBLIC_IP"
-echo "  Registry:   http://$PUBLIC_IP:6900"
-echo "  Health:     http://$PUBLIC_IP:6900/health"
-echo "  Stats:      http://$PUBLIC_IP:6900/stats"
+echo "📦 Instance Details:"
+echo "   Instance ID: $INSTANCE_ID"
+echo "   Public IP: $PUBLIC_IP"
+echo "   Root Password: $ROOT_PASSWORD"
 echo ""
-echo "🔑 SSH:"
-echo "ssh -i $SSH_KEY_LABEL root@$PUBLIC_IP"
+echo "🌐 Access URLs:"
+echo "   Dashboard:  http://$PUBLIC_IP"
+echo "   Registry:   http://$PUBLIC_IP:6900"
+echo "   Health:     http://$PUBLIC_IP:6900/health"
+echo "   Stats:      http://$PUBLIC_IP:6900/stats"
 echo ""
-echo "🛑 Delete:"
-echo "linode-cli linodes delete $INSTANCE_ID"
+echo "🔑 SSH Access:"
+echo "   ssh -i $SSH_KEY_LABEL root@$PUBLIC_IP"
 echo ""
+echo "✨ Features:"
+echo "   • Full description support for semantic discovery"
+echo "   • MongoDB persistence (if configured)"
+echo "   • Real-time dashboard"
+echo "   • RESTful API"
+echo ""
+echo "📚 Example: Register Agent with Description"
+echo "   curl -X POST http://$PUBLIC_IP:6900/register \\"
+echo "     -H 'Content-Type: application/json' \\"
+echo "     -d '{"
+echo "       \"agent_id\": \"my-agent\","
+echo "       \"agent_url\": \"http://server:8000\","
+echo "       \"description\": \"Does amazing things with AI\""
+echo "     }'"
+echo ""
+echo "   curl -X PUT http://$PUBLIC_IP:6900/agents/my-agent/status \\"
+echo "     -H 'Content-Type: application/json' \\"
+echo "     -d '{"
+echo "       \"alive\": true,"
+echo "       \"capabilities\": [\"capability1\", \"capability2\"]"
+echo "     }'"
+echo ""
+echo "🛑 Delete Instance:"
+echo "   linode-cli linodes delete $INSTANCE_ID"
+echo ""
+echo "================================================================"

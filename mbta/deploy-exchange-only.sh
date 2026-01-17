@@ -1,28 +1,26 @@
 #!/bin/bash
 
 # ============================================================================
-# MBTA Agentcy - Windows-Safe Upload Deployment
+# MBTA Exchange + UI - Separate Deployment (No Agents)
 # ============================================================================
-# Fixed for Git Bash on Windows - properly excludes venv/
+# Deploys only Exchange Agent + Frontend UI to a separate Linode instance
+# Agents must be deployed separately using deploy-agents-only.sh
 # ============================================================================
 
 set -e
 
 OPENAI_API_KEY="$1"
 MBTA_API_KEY="$2"
-LOCAL_PROJECT_PATH="$3"
-REGISTRY_URL="${4:-}"
-REGION="${5:-us-east}"
-INSTANCE_TYPE="${6:-g6-standard-4}"
-ROOT_PASSWORD="${7:-}"
+AGENTS_IP="$3"
+REGION="${4:-us-east}"
+INSTANCE_TYPE="${5:-g6-standard-4}"
+ROOT_PASSWORD="${6:-}"
 
-if [ -z "$OPENAI_API_KEY" ] || [ -z "$MBTA_API_KEY" ] || [ -z "$LOCAL_PROJECT_PATH" ]; then
-    echo "❌ Usage: $0 <OPENAI_KEY> <MBTA_KEY> <LOCAL_PATH> [REGISTRY_URL]"
-    exit 1
-fi
-
-if [ ! -d "$LOCAL_PROJECT_PATH" ]; then
-    echo "❌ Path does not exist: $LOCAL_PROJECT_PATH"
+if [ -z "$OPENAI_API_KEY" ] || [ -z "$MBTA_API_KEY" ] || [ -z "$AGENTS_IP" ]; then
+    echo "❌ Usage: $0 <OPENAI_KEY> <MBTA_KEY> <AGENTS_IP> [REGION] [INSTANCE_TYPE]"
+    echo ""
+    echo "Example:"
+    echo "  bash deploy-exchange-only.sh \"sk-proj-...\" \"c845...\" \"172.104.25.25\""
     exit 1
 fi
 
@@ -30,13 +28,14 @@ if [ -z "$ROOT_PASSWORD" ]; then
     ROOT_PASSWORD=$(openssl rand -base64 32 | tr -d "=+/" | cut -c1-25)
 fi
 
-FIREWALL_LABEL="mbta-agentcy-firewall"
-SSH_KEY_LABEL="mbta-agentcy-key"
+FIREWALL_LABEL="mbta-exchange-firewall"
+SSH_KEY_LABEL="mbta-exchange-key"
 IMAGE_ID="linode/ubuntu22.04"
 DEPLOYMENT_ID=$(date +%Y%m%d-%H%M%S)
 
-echo "🚇 MBTA Agentcy - Upload Deployment"
+echo "🚇 MBTA Exchange + UI - Separate Deployment"
 echo "Deployment ID: $DEPLOYMENT_ID"
+echo "Agents IP: $AGENTS_IP"
 echo ""
 
 # [1/9] Check Linode CLI
@@ -47,19 +46,21 @@ if ! linode-cli --version >/dev/null 2>&1; then
 fi
 echo "✅ Linode CLI ready"
 
-# [2/9] Smart packaging - ONLY include what's needed
-echo "[2/9] Packaging project..."
-cd "$LOCAL_PROJECT_PATH"
-TARBALL_NAME="mbta-${DEPLOYMENT_ID}.tar.gz"
+# [2/9] Package exchange + frontend ONLY (exclude agents)
+echo "[2/9] Packaging exchange + frontend..."
 
-# Check for venv and warn
-if [ -d "venv" ] || [ -d ".venv" ]; then
-    echo "⚠️  Detected venv/ folder - will be excluded"
+if [ ! -d "src/exchange_agent" ]; then
+    echo "❌ src/exchange_agent/ not found! Run from mbta/ folder"
+    exit 1
 fi
 
-# Package ONLY the directories we need
-echo "   Packaging: src/, docker/, observability/"
+TARBALL_NAME="mbta-exchange-${DEPLOYMENT_ID}.tar.gz"
+
+# Package ONLY exchange, frontend, observability, docker
+# EXPLICITLY EXCLUDE agents folder
 tar -czf "/tmp/$TARBALL_NAME" \
+    --exclude='agents' \
+    --exclude='src/agents' \
     --exclude='venv' \
     --exclude='.venv' \
     --exclude='.git' \
@@ -68,38 +69,23 @@ tar -czf "/tmp/$TARBALL_NAME" \
     --exclude='*.pyo' \
     --exclude='.env' \
     --exclude='*.log' \
-    --exclude='*.egg-info' \
-    --exclude='.pytest_cache' \
-    --exclude='node_modules' \
     --exclude='*.key' \
     --exclude='*.key.pub' \
-    src/ \
+    src/exchange_agent/ \
+    src/frontend/ \
+    src/observability/ \
     docker/ \
-    observability/ \
     docker-compose-observability.yml \
     2>/dev/null || true
-
-# Also include these if they exist
-cd "$LOCAL_PROJECT_PATH"
-if [ -f "requirements.txt" ]; then
-    tar -rzf "/tmp/$TARBALL_NAME" requirements.txt 2>/dev/null || true
-fi
 
 TARBALL_SIZE=$(du -h "/tmp/$TARBALL_NAME" | cut -f1)
 TARBALL_BYTES=$(du -b "/tmp/$TARBALL_NAME" | cut -f1)
 
 echo "✅ Packaged: $TARBALL_SIZE"
 
-# Verify size is reasonable
-if [ "$TARBALL_BYTES" -gt 52428800 ]; then  # 50MB
-    echo "❌ ERROR: Tarball is still too large ($TARBALL_SIZE)"
-    echo ""
-    echo "Something unexpected is included. Check contents:"
-    echo "  tar -tzf /tmp/$TARBALL_NAME | head -100"
-    echo ""
-    echo "Expected size: <10MB for source code only"
-    rm "/tmp/$TARBALL_NAME"
-    exit 1
+if [ "$TARBALL_BYTES" -gt 10485760 ]; then  # 10MB
+    echo "⚠️  Warning: Package is larger than expected ($TARBALL_SIZE)"
+    echo "   Check contents: tar -tzf /tmp/$TARBALL_NAME | head -50"
 fi
 
 # [3/9] Setup firewall
@@ -109,7 +95,7 @@ FIREWALL_ID=$(linode-cli firewalls list --text --no-headers --format="id,label" 
 INBOUND_RULES='[
     {"protocol": "TCP", "ports": "22", "addresses": {"ipv4": ["0.0.0.0/0"]}, "action": "ACCEPT"},
     {"protocol": "TCP", "ports": "3000", "addresses": {"ipv4": ["0.0.0.0/0"]}, "action": "ACCEPT"},
-    {"protocol": "TCP", "ports": "8100-8003", "addresses": {"ipv4": ["0.0.0.0/0"]}, "action": "ACCEPT"},
+    {"protocol": "TCP", "ports": "8100", "addresses": {"ipv4": ["0.0.0.0/0"]}, "action": "ACCEPT"},
     {"protocol": "TCP", "ports": "16686", "addresses": {"ipv4": ["0.0.0.0/0"]}, "action": "ACCEPT"},
     {"protocol": "TCP", "ports": "3001", "addresses": {"ipv4": ["0.0.0.0/0"]}, "action": "ACCEPT"}
 ]'
@@ -123,13 +109,13 @@ if [ -z "$FIREWALL_ID" ]; then
     FIREWALL_ID=$(linode-cli firewalls list --text --no-headers --format="id,label" | grep "$FIREWALL_LABEL" | cut -f1)
     echo "✅ Created firewall"
 else
-    echo "✅ Using existing firewall"
+    echo "✅ Using existing firewall: $FIREWALL_ID"
 fi
 
 # [4/9] Setup SSH key
 echo "[4/9] Setting up SSH key..."
 if [ ! -f "${SSH_KEY_LABEL}.pub" ]; then
-    ssh-keygen -t rsa -b 4096 -f "$SSH_KEY_LABEL" -N "" -C "mbta-$DEPLOYMENT_ID" >/dev/null 2>&1
+    ssh-keygen -t rsa -b 4096 -f "$SSH_KEY_LABEL" -N "" -C "mbta-exchange-$DEPLOYMENT_ID" >/dev/null 2>&1
     echo "✅ Generated SSH key"
 else
     echo "✅ Using existing SSH key"
@@ -141,12 +127,13 @@ INSTANCE_ID=$(linode-cli linodes create \
     --type "$INSTANCE_TYPE" \
     --region "$REGION" \
     --image "$IMAGE_ID" \
-    --label "mbta-agentcy-$DEPLOYMENT_ID" \
-    --tags "MBTA-Agentcy" \
+    --label "mbta-exchange-$DEPLOYMENT_ID" \
+    --tags "MBTA-Exchange" \
     --root_pass "$ROOT_PASSWORD" \
     --authorized_keys "$(cat ${SSH_KEY_LABEL}.pub)" \
     --firewall_id "$FIREWALL_ID" \
     --text --no-headers --format="id")
+
 echo "✅ Instance ID: $INSTANCE_ID"
 
 echo "   Waiting for instance..."
@@ -171,15 +158,14 @@ for i in {1..60}; do
     sleep 5
 done
 
-# [7/9] Upload (should be fast now - <10MB)
-echo "[7/9] Uploading project ($TARBALL_SIZE)..."
+# [7/9] Upload code
+echo "[7/9] Uploading exchange + frontend ($TARBALL_SIZE)..."
 
 if scp -i "$SSH_KEY_LABEL" -o StrictHostKeyChecking=no -o ServerAliveInterval=30 \
     "/tmp/$TARBALL_NAME" "root@$PUBLIC_IP:/tmp/"; then
     echo "✅ Upload successful!"
 else
     echo "❌ Upload failed"
-    echo "🛑 Cleanup: linode-cli linodes delete $INSTANCE_ID"
     exit 1
 fi
 
@@ -189,78 +175,65 @@ ssh -i "$SSH_KEY_LABEL" -o StrictHostKeyChecking=no "root@$PUBLIC_IP" bash << 'P
 set -e
 export DEBIAN_FRONTEND=noninteractive
 
-echo "Updating system..."
 apt-get update -y >/dev/null 2>&1
 apt-get install -y software-properties-common >/dev/null 2>&1
 
-echo "Installing Python 3.11..."
 add-apt-repository -y ppa:deadsnakes/ppa >/dev/null 2>&1
 apt-get update -y >/dev/null 2>&1
-apt-get install -y python3.11 python3.11-venv python3.11-dev python3-pip git supervisor >/dev/null 2>&1
+apt-get install -y python3.11 python3.11-venv python3.11-dev python3-pip git supervisor \
+    docker.io docker-compose >/dev/null 2>&1
 
-echo "Installing Docker..."
-curl -fsSL https://get.docker.com -o get-docker.sh
-sh get-docker.sh >/dev/null 2>&1
 systemctl enable docker >/dev/null 2>&1
 systemctl start docker >/dev/null 2>&1
 
-echo "✅ System packages installed"
+echo "✅ Packages installed"
 PACKAGES
 
 # [9/9] Setup services
-echo "[9/9] Configuring services (5-10 min)..."
+echo "[9/9] Configuring exchange + frontend (5-10 min)..."
 
 ssh -i "$SSH_KEY_LABEL" -o StrictHostKeyChecking=no "root@$PUBLIC_IP" bash << SETUP
 set -e
 
-echo "Setting up MBTA Agentcy..."
 cd /opt
 mkdir -p mbta-agentcy
 cd mbta-agentcy
 
-echo "Extracting project..."
 tar -xzf /tmp/$TARBALL_NAME
-echo "✅ Extracted"
+rm /tmp/$TARBALL_NAME
 
-# Create venv with Python 3.11
-echo "Creating Python 3.11 virtual environment..."
+# Create Python 3.11 venv
 python3.11 -m venv venv
 source venv/bin/activate
 
-python --version
-
-# Install dependencies
-echo "Installing Python packages (this takes 5 minutes)..."
 pip install --upgrade pip >/dev/null 2>&1
 
+# Install dependencies
 pip install fastapi uvicorn httpx openai scikit-learn numpy pydantic \
-    python-dotenv aiofiles websockets mcp langchain-core langgraph \
-    opentelemetry-api opentelemetry-sdk opentelemetry-exporter-otlp >/dev/null 2>&1
+    python-dotenv websockets langgraph langchain-core \
+    opentelemetry-api opentelemetry-sdk opentelemetry-exporter-otlp \
+    >/dev/null 2>&1
 
-echo "Installing mbta-mcp..."
+# Install mbta-mcp
 pip install git+https://github.com/cubismod/mbta-mcp.git >/dev/null 2>&1
 
-echo "✅ Python packages installed"
+echo "✅ Dependencies installed"
 
 # Create .env
 cat > .env << ENV
 OPENAI_API_KEY=$OPENAI_API_KEY
 MBTA_API_KEY=$MBTA_API_KEY
-REGISTRY_URL=$REGISTRY_URL
-PUBLIC_IP=$PUBLIC_IP
-OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4317
+PYTHONPATH=/opt/mbta-agentcy
 ENV
-
-echo "✅ Environment configured"
 
 # Start observability if docker-compose exists
 if [ -f docker-compose-observability.yml ]; then
-    echo "Starting observability stack..."
+    echo "Starting observability..."
     docker compose -f docker-compose-observability.yml up -d 2>/dev/null || echo "⚠️  Observability skipped"
     sleep 10
 fi
 
-# Create supervisor configs
+# Supervisor config - Exchange Agent
 cat > /etc/supervisor/conf.d/mbta-exchange.conf << 'S1'
 [program:mbta-exchange]
 command=/opt/mbta-agentcy/venv/bin/python -m src.exchange_agent.exchange_server
@@ -272,56 +245,25 @@ stdout_logfile=/var/log/mbta-exchange.out.log
 environment=PYTHONPATH="/opt/mbta-agentcy"
 S1
 
-cat > /etc/supervisor/conf.d/mbta-alerts.conf << 'S2'
-[program:mbta-alerts]
-command=/opt/mbta-agentcy/venv/bin/python -m uvicorn src.agents.alerts.main:app --host 0.0.0.0 --port 8001
-directory=/opt/mbta-agentcy
-autostart=true
-autorestart=true
-stderr_logfile=/var/log/mbta-alerts.err.log
-stdout_logfile=/var/log/mbta-alerts.out.log
-environment=PYTHONPATH="/opt/mbta-agentcy"
-S2
-
-cat > /etc/supervisor/conf.d/mbta-planner.conf << 'S3'
-[program:mbta-planner]
-command=/opt/mbta-agentcy/venv/bin/python -m uvicorn src.agents.planner.main:app --host 0.0.0.0 --port 8002
-directory=/opt/mbta-agentcy
-autostart=true
-autorestart=true
-stderr_logfile=/var/log/mbta-planner.err.log
-stdout_logfile=/var/log/mbta-planner.out.log
-environment=PYTHONPATH="/opt/mbta-agentcy"
-S3
-
-cat > /etc/supervisor/conf.d/mbta-stopfinder.conf << 'S4'
-[program:mbta-stopfinder]
-command=/opt/mbta-agentcy/venv/bin/python -m uvicorn src.agents.stopfinder.main:app --host 0.0.0.0 --port 8003
-directory=/opt/mbta-agentcy
-autostart=true
-autorestart=true
-stderr_logfile=/var/log/mbta-stopfinder.err.log
-stdout_logfile=/var/log/mbta-stopfinder.out.log
-environment=PYTHONPATH="/opt/mbta-agentcy"
-S4
-
-cat > /etc/supervisor/conf.d/mbta-frontend.conf << 'S5'
+# Supervisor config - Frontend UI
+cat > /etc/supervisor/conf.d/mbta-frontend.conf << 'S2'
 [program:mbta-frontend]
-command=/opt/mbta-agentcy/venv/bin/python -m uvicorn src.frontend.chat_server:app --host 0.0.0.0 --port 3000
+command=/opt/mbta-agentcy/venv/bin/python -m src.frontend.chat_server
 directory=/opt/mbta-agentcy
 autostart=true
 autorestart=true
 stderr_logfile=/var/log/mbta-frontend.err.log
 stdout_logfile=/var/log/mbta-frontend.out.log
 environment=PYTHONPATH="/opt/mbta-agentcy"
-S5
+S2
 
-echo "Starting services..."
+# Start services
 supervisorctl reread
 supervisorctl update
-supervisorctl start all
+supervisorctl start mbta-exchange
+supervisorctl start mbta-frontend
 
-sleep 20
+sleep 10
 
 echo ""
 echo "=== Service Status ==="
@@ -334,28 +276,58 @@ rm "/tmp/$TARBALL_NAME" 2>/dev/null || true
 
 echo ""
 echo "🎉 ============================================================================"
-echo "🎉 MBTA Agentcy Deployed!"
+echo "🎉 MBTA Exchange + UI Deployed!"
 echo "🎉 ============================================================================"
 echo ""
 echo "📍 Instance: $INSTANCE_ID | IP: $PUBLIC_IP"
 echo "🔑 Password: $ROOT_PASSWORD"
+echo "🔑 SSH Key: $SSH_KEY_LABEL"
 echo ""
-echo "🌐 URLs:"
+echo "🌐 Endpoints:"
 echo "   Exchange:  http://$PUBLIC_IP:8100"
 echo "   Frontend:  http://$PUBLIC_IP:3000"
 echo "   Jaeger:    http://$PUBLIC_IP:16686"
+echo "   Grafana:   http://$PUBLIC_IP:3001"
 echo ""
-if [ -n "$REGISTRY_URL" ]; then
-    echo "📡 Registry: Agents will auto-register with $REGISTRY_URL"
-    echo "   Check: curl $REGISTRY_URL/list"
-    echo ""
-fi
-echo "🧪 Test:"
+echo "🔗 Connected to Agents:"
+echo "   Agents IP: $AGENTS_IP"
+echo "   Alerts:     http://$AGENTS_IP:8001"
+echo "   Planner:    http://$AGENTS_IP:8002"
+echo "   StopFinder: http://$AGENTS_IP:8003"
+echo ""
+echo "🧪 Test Commands:"
 echo "   curl http://$PUBLIC_IP:8100/"
+echo "   curl -X POST http://$PUBLIC_IP:8100/chat -d '{\"query\":\"Red Line delays?\"}'"
+echo "   http://$PUBLIC_IP:3000"
 echo ""
-echo "📝 Logs:"
-echo "   ssh -i $SSH_KEY_LABEL root@$PUBLIC_IP 'tail -f /var/log/mbta-exchange.out.log'"
+echo "📝 SSH Access:"
+echo "   ssh -i $SSH_KEY_LABEL root@$PUBLIC_IP"
 echo ""
-echo "🛑 Delete:"
+echo "🛑 Delete Instance:"
 echo "   linode-cli linodes delete $INSTANCE_ID"
+echo ""
+
+# Save deployment info
+cat > exchange-deployment-info.txt << EOF
+MBTA Exchange + UI Deployment
+==============================
+Deployed: $(date)
+Instance ID: $INSTANCE_ID
+Public IP: $PUBLIC_IP
+Root Password: $ROOT_PASSWORD
+SSH Key: $SSH_KEY_LABEL
+
+Endpoints:
+- Exchange: http://$PUBLIC_IP:8100
+- Frontend: http://$PUBLIC_IP:3000
+- Jaeger: http://$PUBLIC_IP:16686
+
+Connected Agents:
+- Agents IP: $AGENTS_IP
+- Alerts: http://$AGENTS_IP:8001
+- Planner: http://$AGENTS_IP:8002
+- StopFinder: http://$AGENTS_IP:8003
+EOF
+
+echo "💾 Deployment info saved: exchange-deployment-info.txt"
 echo ""
